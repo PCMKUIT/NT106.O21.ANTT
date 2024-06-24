@@ -24,6 +24,7 @@ namespace LAB6_NT106.O21.ANTT
         public Server()
         {
             InitializeComponent();
+            button1.Enabled = true;
             button2.Enabled = false;
         }
 
@@ -34,6 +35,7 @@ namespace LAB6_NT106.O21.ANTT
             serverSocket.Listen(8080);
             serverSocket.BeginAccept(new AsyncCallback(AcceptCallback), null);
             button2.Enabled = true;
+            button1.Enabled = false;
             Route();
         }
 
@@ -41,12 +43,32 @@ namespace LAB6_NT106.O21.ANTT
 
         private void AcceptCallback(IAsyncResult IAR)
         {
-            Socket socket = serverSocket.EndAccept(IAR);
-            clientSockets.Add(socket);
-            clientCount++;
-            UpdateClientCount();
-            socket.BeginReceive(buffer, 0, buffer.Length, SocketFlags.None, new AsyncCallback(ReceiveCallback), socket);
-            serverSocket.BeginAccept(new AsyncCallback(AcceptCallback), null);
+            Socket socket = null;
+            try
+            {
+                if (serverSocket != null)
+                {
+                    socket = serverSocket.EndAccept(IAR);
+                    clientSockets.Add(socket);
+                    clientCount++;
+                    UpdateClientCount();
+                    socket.BeginReceive(buffer, 0, buffer.Length, SocketFlags.None, new AsyncCallback(ReceiveCallback), socket);
+                    serverSocket.BeginAccept(new AsyncCallback(AcceptCallback), null);
+                }
+                else
+                {
+                    //MessageBox.Show("Server socket is null.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // This exception is expected when the client socket is closed.
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error accepting client: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                socket?.Close();
+            }
         }
 
         private void ReceiveCallback(IAsyncResult IAR)
@@ -65,6 +87,16 @@ namespace LAB6_NT106.O21.ANTT
                 UpdateClientCount();
                 return;
             }
+            catch (ObjectDisposedException)
+            {
+                // This exception is expected when the client socket is closed.
+                return;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error receiving data: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
             byte[] recBuf = new byte[received];
             Array.Copy(buffer, recBuf, received);
@@ -78,14 +110,25 @@ namespace LAB6_NT106.O21.ANTT
                 }
             }
 
-            current.BeginReceive(buffer, 0, buffer.Length, SocketFlags.None, new AsyncCallback(ReceiveCallback), current);
+            try
+            {
+                current.BeginReceive(buffer, 0, buffer.Length, SocketFlags.None, new AsyncCallback(ReceiveCallback), current);
+            }
+            catch (ObjectDisposedException)
+            {
+                // This exception is expected when the client socket is closed.
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error beginning receive: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void UpdateClientCount()
         {
             if (InvokeRequired)
             {
-                Invoke(new Action(UpdateClientCount));
+                BeginInvoke(new Action(UpdateClientCount));
                 return;
             }
             textBox1.Text = clientCount.ToString();
@@ -119,18 +162,33 @@ namespace LAB6_NT106.O21.ANTT
         {
             try
             {
+                byte[] stopMessage = Encoding.ASCII.GetBytes("SERVER_STOP");
                 foreach (Socket socket in clientSockets)
                 {
+                    try
+                    {
+                        socket.Send(stopMessage);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error sending stop message: {ex.Message}");
+                    }
+
                     socket.Shutdown(SocketShutdown.Both);
                     socket.Close();
+                    socket.Dispose();
                 }
                 clientSockets.Clear();
 
                 if (serverSocket != null)
                 {
                     serverSocket.Close();
-                    serverSocket = null; 
+                    serverSocket = null;
                 }
+            }
+            catch (ObjectDisposedException)
+            {
+                // This exception is expected when the client socket is closed.
             }
             catch (Exception ex)
             {

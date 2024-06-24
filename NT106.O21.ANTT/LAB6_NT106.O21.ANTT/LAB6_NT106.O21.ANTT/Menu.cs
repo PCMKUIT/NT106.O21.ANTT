@@ -21,12 +21,15 @@ namespace LAB6_NT106.O21.ANTT
 
         private void button1_Click(object sender, EventArgs e)
         {
-            Server server = new Server();
-            server.ClientCountChanged += Server_ClientCountChanged;
-            server.ServerClosed += Server_ServerClosed;
-            server.Routing += Server_Route;
-            server.Show();
-            button1.Enabled = false;
+            if (server == null || server.IsDisposed)
+            {
+                server = new Server();
+                server.ClientCountChanged += Server_ClientCountChanged;
+                server.ServerClosed += Server_ServerClosed;
+                server.Routing += Server_Route;
+                server.Show();
+                button1.Enabled = false;
+            }
         }
 
         private void button2_Click(object sender, EventArgs e)
@@ -43,14 +46,7 @@ namespace LAB6_NT106.O21.ANTT
                 return;
             }
 
-            if (count >= 5)
-            {
-                button2.Enabled = false;
-            }
-            else
-            {
-                button2.Enabled = true;
-            }
+            button2.Enabled = count < 5;
         }
 
         private void Server_ServerClosed()
@@ -61,6 +57,8 @@ namespace LAB6_NT106.O21.ANTT
                 return;
             }
             button1.Enabled = true;
+            button2.Enabled = false;
+            server = null;
         }
         private void Server_Route()
         {

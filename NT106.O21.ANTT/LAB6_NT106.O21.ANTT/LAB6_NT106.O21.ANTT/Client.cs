@@ -31,6 +31,7 @@ namespace LAB6_NT106.O21.ANTT
         private Point dragStartPoint;
         private Rectangle originalImageBounds;
         private Rectangle currentImageBounds;
+        private bool isRunning = true;
 
         public Client()
         {
@@ -57,45 +58,91 @@ namespace LAB6_NT106.O21.ANTT
         {
             try
             {
-                clientSocket.Connect("127.0.0.1", 8080); //Ip and port, can be adjusted depending on the purpose of use
+                clientSocket.Connect("127.0.0.1", 8080); 
                 serverStream = clientSocket.GetStream();
-                clientThread = new Thread(GetServerResponse);
+                clientThread = new Thread(GetServerResponse)
+                {
+                    IsBackground = true 
+                };
                 clientThread.Start();
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Could not connect to server: " + ex.Message);
+                MessageBox.Show("Could not connect to server: " + ex.Message, "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         private void GetServerResponse()
         {
-            while (true)
+            while (isRunning)
             {
-                byte[] inStream = new byte[clientSocket.ReceiveBufferSize];
-                int bytesRead = serverStream.Read(inStream, 0, inStream.Length);
-                if (bytesRead > 0)
+                try
                 {
-                    MemoryStream ms = new MemoryStream(inStream, 0, bytesRead);
-                    BinaryReader br = new BinaryReader(ms);
-
-                    int startX = br.ReadInt32();
-                    int startY = br.ReadInt32();
-                    int endX = br.ReadInt32();
-                    int endY = br.ReadInt32();
-                    Color color = Color.FromArgb(br.ReadInt32());
-                    float width = br.ReadSingle();
-
-                    Pen pen = new Pen(color, width);
-
-                    Invoke(new Action(() =>
+                    byte[] inStream = new byte[clientSocket.ReceiveBufferSize];
+                    int bytesRead = serverStream.Read(inStream, 0, inStream.Length);
+                    if (bytesRead > 0)
                     {
-                        using (Graphics g = Graphics.FromImage(drawingBitmap))
+                        string response = Encoding.ASCII.GetString(inStream, 0, bytesRead);
+
+                        if (response == "SERVER_STOP")
                         {
-                            g.DrawLine(pen, new Point(startX, startY), new Point(endX, endY));
+                            Invoke(new Action(() =>
+                            {
+                                MessageBox.Show("Server has stopped. The application will now close.", "Server Stopped", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                Close();
+                            }));
+                            break;
                         }
-                        panel1.Invalidate();
-                    }));
+
+                        MemoryStream ms = new MemoryStream(inStream, 0, bytesRead);
+                        BinaryReader br = new BinaryReader(ms);
+
+                        int startX, startY, endX, endY;
+                        Color color;
+                        float width;
+
+                        try
+                        {
+                            startX = br.ReadInt32();
+                            startY = br.ReadInt32();
+                            endX = br.ReadInt32();
+                            endY = br.ReadInt32();
+                            color = Color.FromArgb(br.ReadInt32());
+                            width = br.ReadSingle();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error reading draw data: {ex.Message}");
+                            continue; 
+                        }
+
+                        Pen pen = new Pen(color, width);
+
+                        Invoke(new Action(() =>
+                        {
+                            try
+                            {
+                                using (Graphics g = Graphics.FromImage(drawingBitmap))
+                                {
+                                    g.DrawLine(pen, new Point(startX, startY), new Point(endX, endY));
+                                }
+                                panel1.Invalidate();
+                            }
+                            catch (OverflowException ex)
+                            {
+                                Console.WriteLine($"Overflow error in drawing line: {ex.Message}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error drawing line: {ex.Message}");
+                            }
+                        }));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error in GetServerResponse: {ex.Message}");
+                    if (!isRunning) break; 
                 }
             }
         }
@@ -129,6 +176,8 @@ namespace LAB6_NT106.O21.ANTT
                     int eraserSize = GetEraserSize();
                     g.FillEllipse(Brushes.White, e.X - eraserSize / 2, e.Y - eraserSize / 2, eraserSize, eraserSize);
                 }
+
+                SendEraseData(e.Location);
             }
 
             if (e.Button == MouseButtons.Left)
@@ -157,6 +206,7 @@ namespace LAB6_NT106.O21.ANTT
                     {
                         int eraserSize = GetEraserSize();
                         g.FillEllipse(Brushes.White, e.X - eraserSize / 2, e.Y - eraserSize / 2, eraserSize, eraserSize);
+                        SendEraseData(e.Location);
                     }
                 }
                 previousPoint = e.Location;
@@ -285,24 +335,91 @@ namespace LAB6_NT106.O21.ANTT
             {
                 case 1:
                     DrawCircle(randomColor);
+                    SendRandomShape(1, randomColor);
                     break;
                 case 2:
                     DrawTriangle(randomColor);
+                    SendRandomShape(2, randomColor);
                     break;
                 case 3:
                     DrawSquare(randomColor);
+                    SendRandomShape(3, randomColor);
                     break;
                 case 4:
                     DrawDiamond(randomColor);
+                    SendRandomShape(4, randomColor);
                     break;
                 case 5:
                     DrawCrossLines(randomColor);
+                    SendRandomShape(5, randomColor);
                     break;
                 default:
                     break;
             }
+
+            using (Graphics g = Graphics.FromImage(drawingBitmap))
+            {
+                switch (shapeType)
+                {
+                    case 1:
+                        DrawCircle(randomColor, g);
+                        break;
+                    case 2:
+                        DrawTriangle(randomColor, g);
+                        break;
+                    case 3:
+                        DrawSquare(randomColor, g);
+                        break;
+                    case 4:
+                        DrawDiamond(randomColor, g);
+                        break;
+                    case 5:
+                        DrawCrossLines(randomColor, g);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            panel1.Invalidate();
+        }
+        private void DrawCircle(Color color, Graphics g = null)
+        {
+            if (g == null)
+            {
+                g = panel1.CreateGraphics();
+            }
+
+            int centerX = panel1.Width / 2;
+            int centerY = panel1.Height / 2;
+            int radius = 50;
+
+            using (Brush brush = new SolidBrush(color))
+            {
+                g.FillEllipse(brush, centerX - radius, centerY - radius, 2 * radius, 2 * radius);
+            }
         }
 
+        private void DrawTriangle(Color color, Graphics g = null)
+        {
+            if (g == null)
+            {
+                g = panel1.CreateGraphics();
+            }
+
+            int centerX = panel1.Width / 2;
+            int centerY = panel1.Height / 2;
+
+            Point[] points = new Point[3];
+            points[0] = new Point(centerX, centerY - 50);
+            points[1] = new Point(centerX - 50, centerY + 50);
+            points[2] = new Point(centerX + 50, centerY + 50);
+
+            using (Brush brush = new SolidBrush(color))
+            {
+                g.FillPolygon(brush, points);
+            }
+        }
         private void DrawCircle(Color color)
         {
             using (Graphics g = panel1.CreateGraphics())
@@ -315,6 +432,62 @@ namespace LAB6_NT106.O21.ANTT
                 {
                     g.FillEllipse(brush, centerX - radius, centerY - radius, 2 * radius, 2 * radius);
                 }
+            }
+        }
+        private void DrawSquare(Color color, Graphics g = null)
+        {
+            if (g == null)
+            {
+                g = panel1.CreateGraphics();
+            }
+
+            int centerX = panel1.Width / 2;
+            int centerY = panel1.Height / 2;
+            int sideLength = 100;
+
+            using (Brush brush = new SolidBrush(color))
+            {
+                g.FillRectangle(brush, centerX - sideLength / 2, centerY - sideLength / 2, sideLength, sideLength);
+            }
+        }
+        private void DrawDiamond(Color color, Graphics g = null)
+        {
+            if (g == null)
+            {
+                g = panel1.CreateGraphics();
+            }
+
+            int centerX = panel1.Width / 2;
+            int centerY = panel1.Height / 2;
+            int width = 100;
+            int height = 100;
+
+            Point[] points = new Point[4];
+            points[0] = new Point(centerX, centerY - height / 2);
+            points[1] = new Point(centerX - width / 2, centerY);
+            points[2] = new Point(centerX, centerY + height / 2);
+            points[3] = new Point(centerX + width / 2, centerY);
+
+            using (Brush brush = new SolidBrush(color))
+            {
+                g.FillPolygon(brush, points);
+            }
+        }
+        private void DrawCrossLines(Color color, Graphics g = null)
+        {
+            if (g == null)
+            {
+                g = panel1.CreateGraphics();
+            }
+
+            int centerX = panel1.Width / 2;
+            int centerY = panel1.Height / 2;
+            int lineLength = 50;
+
+            using (Pen pen = new Pen(color))
+            {
+                g.DrawLine(pen, centerX - lineLength, centerY - lineLength, centerX + lineLength, centerY + lineLength);
+                g.DrawLine(pen, centerX - lineLength, centerY + lineLength, centerX + lineLength, centerY - lineLength);
             }
         }
 
@@ -396,6 +569,7 @@ namespace LAB6_NT106.O21.ANTT
             System.Windows.Forms.Application.Exit();
         }
 
+
         private void button7_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
@@ -410,10 +584,34 @@ namespace LAB6_NT106.O21.ANTT
 
         private void SaveDrawing()
         {
-            if (drawingBitmap != null)
+            using (SaveFileDialog saveFileDialog = new SaveFileDialog())
             {
-                string savePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "WhiteboardImage.png");
-                drawingBitmap.Save(savePath, ImageFormat.Png);
+                saveFileDialog.Filter = "PNG Image|*.png";
+                saveFileDialog.Title = "Lưu bản vẽ";
+                saveFileDialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop); // Đặt thư mục ban đầu
+
+                if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        Bitmap bmp = new Bitmap(panel1.Width, panel1.Height);
+                        panel1.DrawToBitmap(bmp, new Rectangle(0, 0, panel1.Width, panel1.Height));
+                        bmp.Save(saveFileDialog.FileName, ImageFormat.Png);
+
+                        MessageBox.Show($"Ảnh đã được lưu thành công tại {saveFileDialog.FileName}", "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            bmp.Save(ms, ImageFormat.Png); 
+                            byte[] imageBytes = ms.ToArray();
+                            SendImage(imageBytes);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Lưu ảnh thất bại: {ex.Message}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
             }
         }
 
@@ -430,9 +628,58 @@ namespace LAB6_NT106.O21.ANTT
             panel1.BackgroundImageLayout = ImageLayout.Stretch;
 
             panel1.Invalidate();
+
+            using (MemoryStream ms = new MemoryStream())
+            {
+                image.Save(ms, ImageFormat.Png); 
+                byte[] imageBytes = ms.ToArray();
+                SendImage(imageBytes);
+            }
         }
 
+        private void SendImage(byte[] imageBytes)
+        {
+            try
+            {
+                byte[] lengthBytes = BitConverter.GetBytes(imageBytes.Length);
+                serverStream.Write(lengthBytes, 0, lengthBytes.Length);
 
+                serverStream.Write(imageBytes, 0, imageBytes.Length);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error sending image data to server: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        private void SendEraseData(Point location)
+        {
+            try
+            {
+                byte[] xBytes = BitConverter.GetBytes(location.X);
+                byte[] yBytes = BitConverter.GetBytes(location.Y);
+
+                serverStream.Write(xBytes, 0, xBytes.Length);
+                serverStream.Write(yBytes, 0, yBytes.Length);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error sending erase data to server: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void SendRandomShape(int shapeType, Color color)
+        {
+            try
+            {
+                BinaryWriter bw = new BinaryWriter(serverStream);
+                bw.Write(shapeType);
+                bw.Write(color.ToArgb());
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error sending random shape data to server: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
         private void panel1_Paint(object sender, PaintEventArgs e)
         {
             if (drawingBitmap != null)
@@ -440,13 +687,22 @@ namespace LAB6_NT106.O21.ANTT
                 e.Graphics.DrawImage(drawingBitmap, new Rectangle(0, 0, panel1.Width, panel1.Height));
             }
         }
- 
-
-        private void Client_FormClosing(object sender, FormClosingEventArgs e)
+        private void ClientForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            clientThread.Abort();
-            clientSocket.Close();
-            base.OnFormClosing(e);
+            isRunning = false;
+            if (clientSocket != null)
+            {
+                try
+                {
+                    clientSocket.Client.Shutdown(SocketShutdown.Both);
+                    clientSocket.Close();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error closing client socket: {ex.Message}");
+                }
+            }
+            System.Windows.Forms.Application.Exit();
         }
     }
 }
